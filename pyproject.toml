@@ -1,10 +1,18 @@
 [project]
 name = "minicc"
 version = "0.1.0"
-description = "Add your description here"
+description = "Mini Claude Code - 极简教学版 AI 编程助手"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "textual[syntax]>=6.5.0",
-    "textual-dev>=1.8.0",
+    "textual[syntax]>=6.6.0",
+    "pydantic-ai>=1.23.0",
+    "pydantic>=2.12.4",
 ]
+
+[project.scripts]
+minicc = "minicc:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

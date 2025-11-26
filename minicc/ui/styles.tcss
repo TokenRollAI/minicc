@@ -1,0 +1,87 @@
+/* MiniCC TUI 样式定义 - 清爽分栏与强调色 */
+
+Screen {
+    layout: vertical;
+    background: #0f111a;
+    color: #e6edf3;
+}
+
+#body {
+    height: 1fr;
+    layout: horizontal;
+    padding: 0 1;
+}
+
+#chat_container {
+    height: 1fr;
+    border: round #8be9fd;
+    padding: 1;
+    background: #0b0d16;
+    scrollbar-gutter: stable;
+}
+
+MessagePanel, ToolCallPanel {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#side_panel {
+    width: 32;
+    padding: 1;
+    background: #0b0d16;
+    border: round #a78bfa;
+    height: 1fr;
+}
+
+#status_bar {
+    border: round #f59e0b;
+    padding: 0 1;
+    height: 3;
+    background: #1f2937;
+}
+
+#info_card {
+    border: round #4ade80;
+    padding: 1;
+    background: #111827;
+    min-height: 6;
+}
+
+#tabs {
+    margin-top: 1;
+    border: round #4ade80;
+    background: #111827;
+    height: 1fr;
+}
+
+TabPane {
+    padding: 1;
+    background: #0b0d16;
+}
+
+#tool_container, #subagent_container {
+    height: 1fr;
+    border: round #8be9fd;
+    padding: 1;
+    background: #0b0d16;
+    scrollbar-gutter: stable;
+}
+
+#input {
+    height: 3;
+    margin: 1 1 0 1;
+    border: round #f59e0b;
+    background: #111827;
+}
+
+#input:focus {
+    border: round #8be9fd;
+}
+
+Header {
+    background: #111827;
+}
+
+Footer {
+    background: #111827;
+}
