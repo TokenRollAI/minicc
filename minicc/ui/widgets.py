@@ -7,8 +7,7 @@ MiniCC 自定义 UI 组件
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.text import Text
-from textual.widgets import Static, Button
-from textual.containers import Horizontal
+from textual.widgets import Static
 from textual.message import Message
 
 from ..schemas import DiffLine, TodoItem, ToolResult

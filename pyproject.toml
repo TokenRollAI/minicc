@@ -1,6 +1,6 @@
 [project]
 name = "minicc"
-version = "0.2.1"
+version = "0.2.2"
 description = "Mini Claude Code - 极简教学版 AI 编程助手"
 readme = "README.md"
 license = "MIT"

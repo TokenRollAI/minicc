@@ -147,6 +147,69 @@ class BackgroundShell(BaseModel):
     is_running: bool = True
 
 
+# ============ ask_user 相关模型 ============
+
+class QuestionOption(BaseModel):
+    """
+    问题选项
+
+    Attributes:
+        label: 选项标签（显示给用户）
+        description: 选项描述（可选，解释该选项的含义）
+    """
+    label: str
+    description: str = ""
+
+
+class Question(BaseModel):
+    """
+    问题定义
+
+    用于 ask_user 工具的问题结构。
+
+    Attributes:
+        question: 问题内容（完整问题文本）
+        header: 短标签（用于显示和作为答案 key）
+        options: 选项列表
+        multi_select: 是否允许多选（默认单选）
+    """
+    question: str
+    header: str
+    options: list[QuestionOption]
+    multi_select: bool = False
+
+
+class AskUserRequest(BaseModel):
+    """
+    ask_user 请求
+
+    Attributes:
+        questions: 问题列表
+    """
+    questions: list[Question]
+
+
+class AskUserResponse(BaseModel):
+    """
+    ask_user 响应
+
+    Attributes:
+        submitted: 是否提交（True=提交, False=取消）
+        answers: 答案字典 {header: answer}，多选时 answer 为列表
+    """
+    submitted: bool
+    answers: dict[str, str | list[str]]
+
+
+class UserCancelledError(Exception):
+    """
+    用户取消操作时抛出的异常
+
+    用于终止 Agent 循环。
+    """
+    pass
+
+
 # ============ Agent 依赖类型 ============
 
 @dataclass
@@ -166,6 +229,9 @@ class MiniCCDeps:
         background_shells: 后台 Shell 进程 {shell_id: (process, BackgroundShell)}
         on_tool_call: 工具调用回调（用于 UI 更新）
         on_todo_update: 任务列表更新回调
+        ask_user_response: ask_user 工具的用户响应
+        ask_user_event: ask_user 等待事件（asyncio.Event）
+        on_ask_user: ask_user 回调（用于显示问答 UI）
     """
     config: Config
     cwd: str
@@ -176,3 +242,7 @@ class MiniCCDeps:
     background_shells: dict[str, tuple[Any, BackgroundShell]] = field(default_factory=dict)
     on_tool_call: Callable[[str, dict, Any], None] | None = None
     on_todo_update: Callable[[list[TodoItem]], None] | None = None
+    # ask_user 相关
+    ask_user_response: Any = None  # AskUserResponse 实例
+    ask_user_event: Any = None  # asyncio.Event 实例
+    on_ask_user: Callable[[Any], None] | None = None  # AskUserRequest 回调

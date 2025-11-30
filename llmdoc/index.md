@@ -13,6 +13,19 @@
 
 ## 最近更新
 
+### ask_user 工具新增 (v0.2.1 - 2025-12-01)
+- **新增工具**: `ask_user` - 向用户提问选择题
+- **功能特性**:
+  - 支持一次提出多个问题
+  - 支持单选题/多选题
+  - 每个问题自动添加"其他"选项，允许用户自定义输入
+  - 提交/取消后自动移除问答面板
+  - 取消时抛出 `UserCancelledError` 终止 Agent 循环
+- **schemas.py 变更**: 新增 `QuestionOption`, `Question`, `AskUserRequest`, `AskUserResponse`, `UserCancelledError` 模型
+- **tools.py 变更**: 新增 `ask_user` 异步工具函数
+- **ui/widgets.py 变更**: 新增 `AskUserPanel` 可交互组件
+- **app.py 变更**: 添加 `on_ask_user` 回调和事件处理
+
 ### Agent-Gear FileSystem 集成 (v0.2 - 2025-11-30)
 - **新增依赖**: agent-gear>=0.1.0 (高性能文件系统操作)
 - **schemas.py 变更**: 新增 `MiniCCDeps.fs` 字段存储 FileSystem 实例

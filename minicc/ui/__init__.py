@@ -6,7 +6,9 @@ from .widgets import (
     SubAgentLine,
     DiffView,
     BottomBar,
+    TodoDisplay,
 )
+from .ask_user_panel import AskUserPanel
 
 __all__ = [
     "MessagePanel",
@@ -14,4 +16,6 @@ __all__ = [
     "SubAgentLine",
     "DiffView",
     "BottomBar",
+    "TodoDisplay",
+    "AskUserPanel",
 ]

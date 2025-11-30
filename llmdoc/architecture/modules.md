@@ -20,7 +20,7 @@
 
 ## 模块职责
 
-### schemas.py (179 行)
+### schemas.py (248 行)
 数据模型定义，所有 Pydantic 模型集中管理。
 
 **关键类:**
@@ -30,13 +30,21 @@
 - `ToolResult`: 工具执行结果
 - `DiffLine`: Diff 行信息
 - `AgentTask`: SubAgent 任务定义（新增 description, subagent_type）
-- `TodoItem`: 任务列表项（新增）
-- `BackgroundShell`: 后台 Shell 进程信息（新增）
+- `TodoItem`: 任务列表项
+- `BackgroundShell`: 后台 Shell 进程信息
+- `QuestionOption`: 问题选项（新增）
+- `Question`: 问题定义（新增）
+- `AskUserRequest`: ask_user 请求（新增）
+- `AskUserResponse`: ask_user 响应（新增）
+- `UserCancelledError`: 用户取消异常（新增）
 - `MiniCCDeps`: Agent 依赖注入容器，新增字段：
   - `fs: Any = None`: agent-gear FileSystem 实例（高性能文件操作）
   - `todos`: 任务列表（TodoWrite 工具管理）
   - `background_shells`: 后台 Shell 进程字典
   - `on_todo_update`: 任务列表更新回调
+  - `ask_user_response`: ask_user 工具的用户响应（新增）
+  - `ask_user_event`: ask_user 等待事件（新增）
+  - `on_ask_user`: ask_user 回调（新增）
 
 ### config.py (155 行)
 配置文件管理，处理 ~/.minicc 目录。
@@ -47,7 +55,7 @@
 - `load_agents_prompt()`: 加载系统提示词
 - `get_api_key()`: 获取 API 密钥
 
-### tools.py (1259 行)
+### tools.py (1040 行)
 工具函数实现，定义所有可供 Agent 调用的工具。基于 agent-gear FileSystem 进行性能优化，对标 Claude Code。
 
 **工具分类:**
@@ -71,6 +79,11 @@
 - **任务管理**:
   - `task` (创建子任务)
   - `todo_write` (任务追踪)
+- **用户交互**（新增）:
+  - `ask_user` (向用户提问选择题)
+    - 支持单选/多选
+    - 自动添加"其他"选项
+    - 取消时抛出 `UserCancelledError` 终止 Agent 循环
 - **Notebook**:
   - `notebook_edit` (Jupyter notebook 编辑)
 
@@ -119,7 +132,7 @@ BottomBar - 模型/目录/分支/Token
 Footer
 ```
 
-### ui/widgets.py (272 行)
+### ui/widgets.py (530 行)
 自定义 UI 组件集合，已精简为核心组件。
 
 **保留的组件:**
@@ -128,7 +141,12 @@ Footer
 - `SubAgentLine`: SubAgent 单行显示 `🤖 prompt_summary ⏳/🔄/✅/❌`
 - `DiffView`: Diff 显示，颜色区分添加/删除/上下文
 - `BottomBar`: 底边栏，分区块显示模型/目录/分支/Token
-- `TodoDisplay`: 任务列表显示（新增）
+- `TodoDisplay`: 任务列表显示
+- `AskUserPanel`: 用户问答面板（新增）
+  - 支持单选（RadioSet）和多选（Checkbox）
+  - 每个问题自动添加"其他"选项
+  - 提交/取消按钮
+  - 发送 `Submitted` / `Cancelled` 消息
 
 **已移除的组件:**
 - `ToolCallPanel` → 被 `ToolCallLine` 替代（更简洁）

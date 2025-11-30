@@ -19,8 +19,10 @@ from pydantic_ai.messages import PartDeltaEvent, PartStartEvent, TextPart, TextP
 
 from .agent import create_agent
 from .config import load_config
-from .schemas import Config, MiniCCDeps
+from .schemas import AskUserRequest, AskUserResponse, Config, MiniCCDeps, UserCancelledError
 from .ui.widgets import MessagePanel, BottomBar, ToolCallLine, SubAgentLine, TodoDisplay
+from .ui.ask_user_panel import AskUserPanel
+from textual.containers import Container
 
 
 class MiniCCApp(App):
@@ -65,11 +67,13 @@ class MiniCCApp(App):
             cwd=cwd,
             fs=self._fs,
             on_tool_call=self._on_tool_call,
-            on_todo_update=self._on_todo_update
+            on_todo_update=self._on_todo_update,
+            on_ask_user=self._on_ask_user
         )
         self.messages: list[Any] = []
         self._is_processing = False
         self._git_branch = self._get_git_branch()
+        self._current_ask_panel: AskUserPanel | None = None
 
     def _get_git_branch(self) -> str | None:
         """获取当前 git 分支名"""
@@ -92,6 +96,7 @@ class MiniCCApp(App):
         yield Header(show_clock=True)
         yield VerticalScroll(id="chat_container")
         yield TodoDisplay(id="todo_display")  # 固定的任务列表区域
+        yield Container(id="ask_user_container")  # ask_user 面板容器（固定在输入框上方）
         yield Input(id="input", placeholder="输入消息... (Ctrl+C 退出)")
         yield BottomBar(
             model=f"{self.config.provider.value}:{self.config.model}",
@@ -106,6 +111,8 @@ class MiniCCApp(App):
         self.query_one("#input", Input).focus()
         # 初始隐藏空的任务列表
         self.query_one("#todo_display", TodoDisplay).display = False
+        # 初始隐藏 ask_user 容器
+        self.query_one("#ask_user_container", Container).display = False
         self._show_welcome()
         # 等待 FileSystem 索引就绪（后台进行，不阻塞 UI）
         self._wait_fs_ready()
@@ -172,6 +179,9 @@ class MiniCCApp(App):
                     if usage:
                         self._update_tokens(usage)
 
+        except UserCancelledError:
+            self._append_message("⚠️ 操作已取消", role="system")
+
         except Exception as e:
             self._append_message(f"❌ 错误: {e}", role="system")
 
@@ -219,6 +229,61 @@ class MiniCCApp(App):
             todo_display.display = len(todos) > 0
         except Exception:
             pass
+
+    def _on_ask_user(self, request: AskUserRequest) -> None:
+        """
+        ask_user 回调
+
+        当 ask_user 工具被调用时触发，显示问答面板（固定在输入框上方）。
+        """
+        panel = AskUserPanel(request.questions)
+        self._current_ask_panel = panel
+        container = self.query_one("#ask_user_container", Container)
+        container.mount(panel)
+        container.display = True
+        # 禁用主输入框并让面板获取焦点
+        main_input = self.query_one("#input", Input)
+        main_input.disabled = True
+        # 使用 call_later 确保面板完全挂载后再获取焦点
+        self.call_later(panel.focus)
+
+    def _remove_ask_panel(self) -> None:
+        """移除当前问答面板"""
+        if self._current_ask_panel:
+            self._current_ask_panel.remove()
+            self._current_ask_panel = None
+        try:
+            container = self.query_one("#ask_user_container", Container)
+            container.display = False
+        except Exception:
+            pass
+        # 恢复主输入框并获取焦点
+        try:
+            main_input = self.query_one("#input", Input)
+            main_input.disabled = False
+            main_input.focus()
+        except Exception:
+            pass
+
+    def on_ask_user_panel_submitted(self, event: AskUserPanel.Submitted) -> None:
+        """处理用户提交问答"""
+        self._remove_ask_panel()
+        self.deps.ask_user_response = AskUserResponse(
+            submitted=True,
+            answers=event.answers
+        )
+        if self.deps.ask_user_event:
+            self.deps.ask_user_event.set()
+
+    def on_ask_user_panel_cancelled(self, event: AskUserPanel.Cancelled) -> None:
+        """处理用户取消问答"""
+        self._remove_ask_panel()
+        self.deps.ask_user_response = AskUserResponse(
+            submitted=False,
+            answers={}
+        )
+        if self.deps.ask_user_event:
+            self.deps.ask_user_event.set()
 
     def on_todo_display_closed(self, message: TodoDisplay.Closed) -> None:
         """处理任务列表关闭事件"""

@@ -24,8 +24,9 @@ from uuid import uuid4
 
 from pydantic_ai import RunContext
 
-from .schemas import (AgentTask, BackgroundShell, DiffLine, MiniCCDeps,
-                      TodoItem, ToolResult)
+from .schemas import (AgentTask, AskUserRequest, AskUserResponse, BackgroundShell,
+                      DiffLine, MiniCCDeps, Question, QuestionOption,
+                      TodoItem, ToolResult, UserCancelledError)
 
 # ============ 常量配置 ============
 
@@ -708,6 +709,79 @@ async def todo_write(
             ctx, "todo_write", {},
             ToolResult(success=False, output="", error=str(e))
         )
+
+
+async def ask_user(
+    ctx: RunContext[MiniCCDeps],
+    questions: list[dict],
+) -> ToolResult:
+    """
+    向用户提问选择题
+
+    显示一个可交互的问答面板，等待用户选择或输入答案。
+    每个问题都会自动添加"其他"选项，允许用户自定义输入。
+
+    Args:
+        questions: 问题列表，每项包含:
+            - question: 问题内容（如 "使用哪个库？"）
+            - header: 短标签（如 "Library"，用于显示和作为答案 key）
+            - options: 选项列表 [{"label": "React", "description": "..."}, ...]
+            - multi_select: 是否多选（默认 False）
+
+    Returns:
+        用户回答的 JSON 格式字符串
+
+    Raises:
+        UserCancelledError: 用户点击取消时抛出，终止 Agent 循环
+    """
+    # 1. 创建 Event 用于等待
+    event = asyncio.Event()
+    ctx.deps.ask_user_event = event
+    ctx.deps.ask_user_response = None
+
+    # 2. 解析问题并触发 UI 回调
+    parsed_questions = []
+    for q in questions:
+        options = [
+            QuestionOption(
+                label=opt.get("label", ""),
+                description=opt.get("description", "")
+            )
+            for opt in q.get("options", [])
+        ]
+        parsed_questions.append(Question(
+            question=q.get("question", ""),
+            header=q.get("header", ""),
+            options=options,
+            multi_select=q.get("multi_select", False)
+        ))
+
+    request = AskUserRequest(questions=parsed_questions)
+
+    if ctx.deps.on_ask_user:
+        ctx.deps.on_ask_user(request)
+    else:
+        return _finalize(
+            ctx, "ask_user", {"questions": len(questions)},
+            ToolResult(success=False, output="", error="ask_user 回调未配置")
+        )
+
+    # 3. 等待用户回答
+    await event.wait()
+
+    # 4. 返回结果
+    response = ctx.deps.ask_user_response
+    if response is None or not response.submitted:
+        # 抛出异常终止 Agent 循环
+        raise UserCancelledError("用户取消了操作")
+
+    return _finalize(
+        ctx, "ask_user", {"questions": len(questions)},
+        ToolResult(
+            success=True,
+            output=json.dumps(response.answers, ensure_ascii=False)
+        )
+    )
 
 
 # ============ 辅助函数 ============

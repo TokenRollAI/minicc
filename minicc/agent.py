@@ -119,6 +119,9 @@ def create_agent(config: Config) -> Agent[MiniCCDeps, str]:
     agent.tool(tools.task)
     agent.tool(tools.todo_write)
 
+    # 用户交互
+    agent.tool(tools.ask_user)
+
     return agent
 
 

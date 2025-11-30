@@ -55,3 +55,18 @@ Header {
 Footer {
     background: #111827;
 }
+
+/* ask_user 容器样式 */
+#ask_user_container {
+    height: auto;
+    margin: 0 1 1 1;
+}
+
+/* AskUserPanel 样式 - 与其他组件风格一致 */
+AskUserPanel {
+    height: auto;
+}
+
+AskUserPanel:focus {
+    border: round #f59e0b;
+}
