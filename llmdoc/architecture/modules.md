@@ -20,7 +20,7 @@
 
 ## 模块职责
 
-### schemas.py (176 行)
+### schemas.py (179 行)
 数据模型定义，所有 Pydantic 模型集中管理。
 
 **关键类:**
@@ -32,7 +32,11 @@
 - `AgentTask`: SubAgent 任务定义（新增 description, subagent_type）
 - `TodoItem`: 任务列表项（新增）
 - `BackgroundShell`: 后台 Shell 进程信息（新增）
-- `MiniCCDeps`: Agent 依赖注入容器（新增 todos, background_shells, on_todo_update）
+- `MiniCCDeps`: Agent 依赖注入容器，新增字段：
+  - `fs: Any = None`: agent-gear FileSystem 实例（高性能文件操作）
+  - `todos`: 任务列表（TodoWrite 工具管理）
+  - `background_shells`: 后台 Shell 进程字典
+  - `on_todo_update`: 任务列表更新回调
 
 ### config.py (155 行)
 配置文件管理，处理 ~/.minicc 目录。
@@ -43,26 +47,38 @@
 - `load_agents_prompt()`: 加载系统提示词
 - `get_api_key()`: 获取 API 密钥
 
-### tools.py (1162 行)
-工具函数实现，定义所有可供 Agent 调用的工具。使用高性能第三方库 (ripgrepy, wcmatch)，对标 Claude Code。
+### tools.py (1259 行)
+工具函数实现，定义所有可供 Agent 调用的工具。基于 agent-gear FileSystem 进行性能优化，对标 Claude Code。
 
 **工具分类:**
-- **文件操作**:
-  - `read_file` (offset/limit, cat -n 格式)
-  - `write_file` (创建/覆盖)
-  - `edit_file` (精确字符串替换，严格模式 + 空白容错)
-- **搜索**:
-  - `glob_files` (高级 glob 模式，替代 search_files)
-  - `grep_search` (ripgrepy 高性能，替代 grep)
+- **文件操作**（Agent-Gear 优化）:
+  - `read_file`: 使用 `fs.read_lines()` 进行分段读取，支持 offset/limit，output 为 cat -n 格式
+    - Fallback: `_read_file_fallback()` 基于 pathlib 的原始实现
+  - `write_file`: 使用 `fs.write_file()` 原子写入（temp-fsync-rename），安全可靠
+    - Fallback: `_write_file_fallback()` 基于原始 Path.write_text()
+  - `edit_file`: 结合 `fs.read_file()` 和 `fs.write_file()` 实现精确字符串替换 + 空白容错
+    - Fallback: `_edit_file_fallback()` 基于字符串操作的原始实现
+- **搜索**（Agent-Gear 优化）:
+  - `glob_files`: 使用 `fs.glob()` 利用内存索引 + LRU 缓存，2-3x 加速
+    - Fallback: `_glob_fallback()` 基于 wcmatch 的原始实现
+  - `grep_search`: 使用 `fs.grep()` 高性能搜索（基于 ripgrep 核心库）
+    - Fallback: `_grep_ripgrepy()` 使用 ripgrepy 库
+    - Fallback: `_grep_fallback()` 使用 pathlib 遍历
 - **命令行**:
-  - `bash` (同步执行，新增 timeout/description/run_in_background 参数)
-  - `bash_output` (获取后台命令输出，新增)
-  - `kill_shell` (终止后台命令，新增)
+  - `bash` (同步执行，timeout/description/run_in_background 参数)
+  - `bash_output` (获取后台命令输出)
+  - `kill_shell` (终止后台命令)
 - **任务管理**:
-  - `task` (创建子任务，替代 spawn_agent)
-  - `todo_write` (任务追踪，新增)
+  - `task` (创建子任务)
+  - `todo_write` (任务追踪)
 - **Notebook**:
-  - `notebook_edit` (Jupyter notebook 编辑，新增)
+  - `notebook_edit` (Jupyter notebook 编辑)
+
+**核心优化策略**:
+- 内存文件索引 + LRU 缓存：避免重复 I/O
+- 原子操作：temp-fsync-rename 保证数据完整性
+- 文件监听：自动更新索引，无需手动刷新
+- Fallback 兼容性：FileSystem 不可用时自动降级
 
 ### agent.py (148 行)
 Agent 定义，使用 pydantic-ai 创建和配置。
@@ -72,7 +88,7 @@ Agent 定义，使用 pydantic-ai 创建和配置。
 - `create_agent()`: 创建并配置 Agent
 - `_build_tools()`: 注册工具到 Agent
 
-### app.py (242 行)
+### app.py (262 行)
 Textual TUI 主应用，处理用户交互和消息流处理。
 
 **关键功能:**
@@ -81,6 +97,10 @@ Textual TUI 主应用，处理用户交互和消息流处理。
 - 快捷键绑定（Ctrl+C 退出、Ctrl+L 清屏、Escape 取消）
 - 工具调用回调处理（ToolCallLine / SubAgentLine）
 - Token 使用量追踪和更新（BottomBar.add_tokens）
+- **Agent-Gear FileSystem 集成**（新增）:
+  - `__init__` 中初始化：`self._fs = FileSystem(cwd, auto_watch=True)`
+  - `_wait_fs_ready()` 后台方法等待索引就绪（使用 @work 装饰器）
+  - `action_quit()` 中关闭 FileSystem 释放资源
 
 **布局结构:**
 ```

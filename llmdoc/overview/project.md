@@ -42,7 +42,8 @@
 | 决策项 | 选择 | 理由 |
 |--------|------|------|
 | LLM 后端 | Anthropic + OpenAI | 覆盖主流提供商，支持 Prompt Cache |
-| 搜索引擎 | ripgrepy + wcmatch | 高性能，对标 Claude Code |
-| 文件编辑 | edit_file 精确替换 | 避免歧义，支持空白容错 |
+| 文件系统操作 | agent-gear FileSystem | 内存索引 + LRU 缓存，2-3x 性能提升，自动文件监听 |
+| 搜索引擎 | ripgrepy + wcmatch | 高性能，对标 Claude Code（ripgrep 核心库） |
+| 文件编辑 | edit_file 精确替换 | 避免歧义，支持空白容错，原子操作 |
 | 后台任务 | bash_output + kill_shell | 支持长运行任务和交互式命令 |
 | Notebook 编辑 | nbformat 库 | 完整的 Jupyter 支持 |

@@ -159,6 +159,7 @@ class MiniCCDeps:
     Attributes:
         config: 应用配置
         cwd: 当前工作目录
+        fs: Agent-Gear FileSystem 实例（高性能文件操作）
         sub_agents: 子任务追踪字典 {task_id: AgentTask}
         sub_agent_tasks: 子任务的 asyncio 任务句柄
         todos: 任务列表（TodoWrite 工具管理）
@@ -168,6 +169,7 @@ class MiniCCDeps:
     """
     config: Config
     cwd: str
+    fs: Any = None  # agent_gear.FileSystem 实例
     sub_agents: dict[str, AgentTask] = field(default_factory=dict)
     sub_agent_tasks: dict[str, AsyncTask] = field(default_factory=dict)
     todos: list[TodoItem] = field(default_factory=list)

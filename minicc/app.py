@@ -8,6 +8,7 @@ import os
 import subprocess
 from typing import Any
 
+from agent_gear import FileSystem
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -54,9 +55,15 @@ class MiniCCApp(App):
         super().__init__()
         self.config = config or load_config()
         self.agent = create_agent(self.config)
+        cwd = os.getcwd()
+
+        # 初始化 Agent-Gear FileSystem（全局单例，启用文件监听）
+        self._fs = FileSystem(cwd, auto_watch=True)
+
         self.deps = MiniCCDeps(
             config=self.config,
-            cwd=os.getcwd(),
+            cwd=cwd,
+            fs=self._fs,
             on_tool_call=self._on_tool_call,
             on_todo_update=self._on_todo_update
         )
@@ -100,6 +107,14 @@ class MiniCCApp(App):
         # 初始隐藏空的任务列表
         self.query_one("#todo_display", TodoDisplay).display = False
         self._show_welcome()
+        # 等待 FileSystem 索引就绪（后台进行，不阻塞 UI）
+        self._wait_fs_ready()
+
+    @work(thread=True)
+    def _wait_fs_ready(self) -> None:
+        """后台等待 FileSystem 索引就绪"""
+        if self._fs:
+            self._fs.wait_ready(timeout=30.0)
 
     def _show_welcome(self) -> None:
         """显示欢迎信息"""
@@ -239,6 +254,9 @@ class MiniCCApp(App):
 
     def action_quit(self) -> None:
         """退出动作"""
+        # 关闭 FileSystem 释放资源
+        if self._fs:
+            self._fs.close()
         self.exit()
 
     def action_cancel(self) -> None:

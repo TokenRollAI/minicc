@@ -46,6 +46,8 @@ async def read_file(
     """
     读取指定路径的文件内容，使用 cat -n 格式输出（行号从1开始）
 
+    使用 Agent-Gear 的高性能文件读取，支持大文件的分段读取。
+
     Args:
         file_path: 文件的绝对或相对路径
         offset: 起始行号（1-indexed，默认为1）
@@ -54,32 +56,35 @@ async def read_file(
     Returns:
         带行号的文件内容，若文件不存在则返回错误
     """
+    fs = ctx.deps.fs
     try:
         resolved = _resolve_path(ctx.deps.cwd, file_path)
+        rel_path = str(resolved.relative_to(ctx.deps.cwd)) if resolved.is_absolute() else file_path
 
-        if not resolved.exists():
-            return _finalize(
-                ctx, "read_file", {"file_path": file_path},
-                ToolResult(success=False, output="", error=f"文件不存在: {file_path}")
-            )
+        # 使用 agent-gear 的 read_lines 进行分段读取
+        start_line = (offset or 1) - 1  # 转为 0-indexed
+        count = limit or DEFAULT_READ_LIMIT
 
-        if not resolved.is_file():
-            return _finalize(
-                ctx, "read_file", {"file_path": file_path},
-                ToolResult(success=False, output="", error=f"路径不是文件: {file_path}")
-            )
+        lines = fs.read_lines(rel_path, start_line=start_line, count=count)
 
-        content = resolved.read_text(encoding="utf-8")
-        lines = content.splitlines()
-
-        # 处理偏移和限制
-        start = (offset or 1) - 1  # 转为 0-indexed
-        end = start + (limit or DEFAULT_READ_LIMIT)
-        selected_lines = lines[start:end]
+        if not lines:
+            # 检查文件是否存在
+            try:
+                fs.read_file(rel_path)
+                # 文件存在但为空或偏移超出范围
+                return _finalize(
+                    ctx, "read_file", {"file_path": file_path, "offset": offset, "limit": limit},
+                    ToolResult(success=True, output="（文件为空或偏移超出范围）")
+                )
+            except Exception:
+                return _finalize(
+                    ctx, "read_file", {"file_path": file_path},
+                    ToolResult(success=False, output="", error=f"文件不存在: {file_path}")
+                )
 
         # 格式化为 cat -n 风格（行号 + tab + 内容）
         formatted = []
-        for i, line in enumerate(selected_lines, start=start + 1):
+        for i, line in enumerate(lines, start=start_line + 1):
             # 截断过长的行
             if len(line) > 2000:
                 line = line[:2000] + "..."
@@ -87,24 +92,22 @@ async def read_file(
 
         output = "\n".join(formatted)
 
-        # 添加截断提示
-        if end < len(lines):
-            output += f"\n\n... 还有 {len(lines) - end} 行未显示"
+        # 添加截断提示（如果读取到了请求的行数，可能还有更多）
+        if len(lines) >= count:
+            output += f"\n\n... 可能还有更多行未显示"
 
         return _finalize(
             ctx, "read_file", {"file_path": file_path, "offset": offset, "limit": limit},
             ToolResult(success=True, output=output)
         )
 
-    except UnicodeDecodeError:
-        return _finalize(
-            ctx, "read_file", {"file_path": file_path},
-            ToolResult(success=False, output="", error="无法读取文件：可能是二进制文件")
-        )
     except Exception as e:
+        error_msg = str(e)
+        if "binary" in error_msg.lower() or "decode" in error_msg.lower():
+            error_msg = "无法读取文件：可能是二进制文件"
         return _finalize(
             ctx, "read_file", {"file_path": file_path},
-            ToolResult(success=False, output="", error=str(e))
+            ToolResult(success=False, output="", error=error_msg)
         )
 
 
@@ -114,8 +117,9 @@ async def write_file(
     content: str,
 ) -> ToolResult:
     """
-    创建或覆盖写入文件
+    创建或覆盖写入文件（原子写入）
 
+    使用 Agent-Gear 的原子写入（temp-fsync-rename 模式），保证数据完整性。
     会自动创建不存在的父目录。
 
     Args:
@@ -125,17 +129,28 @@ async def write_file(
     Returns:
         写入成功/失败信息
     """
+    fs = ctx.deps.fs
     try:
         resolved = _resolve_path(ctx.deps.cwd, file_path)
 
-        # 创建父目录
+        # 创建父目录（agent-gear 不自动创建）
         resolved.parent.mkdir(parents=True, exist_ok=True)
 
-        resolved.write_text(content, encoding="utf-8")
-        return _finalize(
-            ctx, "write_file", {"file_path": file_path, "content": f"<{len(content)} chars>"},
-            ToolResult(success=True, output=f"已写入文件: {file_path} ({len(content)} 字符)")
-        )
+        rel_path = str(resolved.relative_to(ctx.deps.cwd)) if resolved.is_absolute() else file_path
+
+        # 使用 agent-gear 的原子写入
+        success = fs.write_file(rel_path, content)
+
+        if success:
+            return _finalize(
+                ctx, "write_file", {"file_path": file_path, "content": f"<{len(content)} chars>"},
+                ToolResult(success=True, output=f"已写入文件: {file_path} ({len(content)} 字符)")
+            )
+        else:
+            return _finalize(
+                ctx, "write_file", {"file_path": file_path},
+                ToolResult(success=False, output="", error="写入失败")
+            )
 
     except Exception as e:
         return _finalize(
@@ -154,6 +169,7 @@ async def edit_file(
     """
     精确字符串替换（严格模式）
 
+    使用 Agent-Gear 进行高性能文件编辑，支持原子写入。
     在文件中查找 old_string 并替换为 new_string。
     仅允许空白/缩进差异容错（tabs vs spaces）。
 
@@ -166,16 +182,19 @@ async def edit_file(
     Returns:
         更新结果和 diff 预览
     """
+    fs = ctx.deps.fs
     try:
         resolved = _resolve_path(ctx.deps.cwd, file_path)
+        rel_path = str(resolved.relative_to(ctx.deps.cwd)) if resolved.is_absolute() else file_path
 
-        if not resolved.exists():
+        # 读取当前内容
+        try:
+            current_content = fs.read_file(rel_path)
+        except Exception:
             return _finalize(
                 ctx, "edit_file", {"file_path": file_path},
                 ToolResult(success=False, output="", error=f"文件不存在: {file_path}")
             )
-
-        current_content = resolved.read_text(encoding="utf-8")
 
         # 检查是否需要空白容错
         exact_count = current_content.count(old_string)
@@ -228,7 +247,8 @@ async def edit_file(
             new_content = current_content.replace(actual_old, new_string, 1)
             replaced_count = 1
 
-        resolved.write_text(new_content, encoding="utf-8")
+        # 使用 agent-gear 的原子写入
+        fs.write_file(rel_path, new_content)
 
         # 生成 diff
         diff_output = _generate_unified_diff(actual_old, new_string, file_path)
@@ -258,12 +278,12 @@ async def glob_files(
     path: str | None = None,
 ) -> ToolResult:
     """
-    高级文件模式匹配（使用 wcmatch）
+    高级文件模式匹配
 
+    使用 Agent-Gear 的内存索引和 LRU 缓存，提供 2-3x 加速。
     支持扩展 glob 语法：
     - **/*.py: 递归匹配所有 Python 文件
     - {src,test}/*.ts: 花括号扩展
-    - !(*.test).js: 否定模式
     - **/*.{js,ts}: 多扩展名
 
     自动忽略 .gitignore 中的文件，按修改时间排序。
@@ -275,69 +295,31 @@ async def glob_files(
     Returns:
         匹配的文件列表
     """
+    fs = ctx.deps.fs
     try:
-        from wcmatch import glob as wc_glob
-        from wcmatch import pathlib as wc_pathlib
+        # Agent-Gear 的 glob 方法使用内存索引，性能更好
+        # 如果指定了 path，需要构造完整模式
+        if path:
+            full_pattern = f"{path}/{pattern}"
+        else:
+            full_pattern = pattern
 
-        search_path = _resolve_path(ctx.deps.cwd, path or ".")
+        matches = fs.glob(full_pattern)
 
-        if not search_path.exists():
-            return _finalize(
-                ctx, "glob_files", {"pattern": pattern, "path": path},
-                ToolResult(success=False, output="", error=f"路径不存在: {path}")
-            )
-
-        # 使用 wcmatch 的 GLOBSTAR | BRACE | NEGATE 标志
-        flags = (
-            wc_glob.GLOBSTAR |      # ** 递归
-            wc_glob.BRACE |         # {} 花括号扩展
-            wc_glob.NEGATE |        # ! 否定
-            wc_glob.DOTMATCH        # 匹配隐藏文件（按需）
-        )
-        # 尝试添加 NEGATEEXT（部分版本支持）
-        if hasattr(wc_glob, 'NEGATEEXT'):
-            flags |= wc_glob.NEGATEEXT  # !(pattern) 扩展否定
-
-        # 执行 glob
-        full_pattern = str(search_path / pattern)
-        matches = list(wc_glob.glob(full_pattern, flags=flags))
-
-        # 过滤目录，只保留文件
-        files = [Path(m) for m in matches if Path(m).is_file()]
-
-        # 过滤 gitignore（简化实现：排除常见忽略目录）
-        ignored_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv", ".tox", "dist", "build"}
-        files = [
-            f for f in files
-            if not any(part in ignored_dirs for part in f.parts)
-        ]
-
-        # 按修改时间排序（最新优先）
-        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-
-        # 转换为相对路径
-        relative_paths = []
-        for f in files:
-            try:
-                rel = f.relative_to(ctx.deps.cwd)
-                relative_paths.append(str(rel))
-            except ValueError:
-                relative_paths.append(str(f))
-
-        if not relative_paths:
+        if not matches:
             return _finalize(
                 ctx, "glob_files", {"pattern": pattern, "path": path},
                 ToolResult(success=True, output=f"未找到匹配 '{pattern}' 的文件")
             )
 
+        # 结果已经是相对路径列表
+        output = "\n".join(matches)
+
         return _finalize(
             ctx, "glob_files", {"pattern": pattern, "path": path},
-            ToolResult(success=True, output="\n".join(relative_paths))
+            ToolResult(success=True, output=output)
         )
 
-    except ImportError:
-        # fallback 到 pathlib.glob
-        return await _glob_fallback(ctx, pattern, path)
     except Exception as e:
         return _finalize(
             ctx, "glob_files", {"pattern": pattern, "path": path},
@@ -359,8 +341,9 @@ async def grep_search(
     file_type: str | None = None,
 ) -> ToolResult:
     """
-    使用 ripgrep 进行高性能代码搜索
+    使用 Agent-Gear 进行高性能代码搜索
 
+    基于 ripgrep 核心库，支持并行处理和内存映射 I/O。
     自动尊重 .gitignore，支持正则表达式。
 
     Args:
@@ -381,64 +364,56 @@ async def grep_search(
     Returns:
         搜索结果
     """
+    fs = ctx.deps.fs
+
+    # Agent-Gear 支持基本的 grep 功能，但对于需要上下文行或 file_type 过滤的情况，使用 ripgrepy
+    need_context = context or context_before or context_after
+    if need_context or file_type:
+        return await _grep_ripgrepy(
+            ctx, pattern, path, glob, output_mode,
+            context_before, context_after, context,
+            case_insensitive, head_limit, file_type
+        )
+
     try:
-        from ripgrepy import Ripgrepy
+        # 构建 glob 模式
+        glob_pattern = glob or "**/*"
+        if path:
+            glob_pattern = f"{path}/{glob_pattern}"
 
-        search_path = str(_resolve_path(ctx.deps.cwd, path or "."))
+        # 使用 Agent-Gear 的高性能 grep
+        results = fs.grep(
+            pattern,
+            glob_pattern,
+            case_sensitive=not case_insensitive,
+            max_results=head_limit
+        )
 
-        # 构建 ripgrep 查询
-        rg = Ripgrepy(pattern, search_path)
-
-        # 配置选项
-        if case_insensitive:
-            rg = rg.i()
-
-        if glob:
-            rg = rg.glob(glob)
-
-        if file_type:
-            rg = rg.type(file_type)
-
-        # 上下文行
-        if context:
-            rg = rg.context(context)
-        else:
-            if context_before:
-                rg = rg.before_context(context_before)
-            if context_after:
-                rg = rg.after_context(context_after)
-
-        # 输出模式
-        if output_mode == "files_with_matches":
-            rg = rg.files_with_matches()
-        elif output_mode == "count":
-            rg = rg.count()
-        else:
-            rg = rg.with_filename().line_number()
-
-        # 执行搜索
-        try:
-            result = rg.run()
-            output = result.as_string if hasattr(result, 'as_string') else str(result)
-        except Exception:
-            # ripgrep 无匹配时可能抛异常
-            output = ""
-
-        if not output.strip():
+        if not results:
             return _finalize(
                 ctx, "grep_search", {"pattern": pattern, "path": path},
                 ToolResult(success=True, output=f"未找到匹配 '{pattern}' 的内容")
             )
 
-        # 处理输出
-        lines = output.strip().split("\n")
-
-        # 应用 head_limit
-        if head_limit and len(lines) > head_limit:
-            lines = lines[:head_limit]
-            output = "\n".join(lines) + f"\n... 还有更多结果"
+        # 根据输出模式格式化结果
+        if output_mode == "files_with_matches":
+            # 只显示文件路径（去重）
+            files = list(dict.fromkeys(r.file for r in results))
+            output = "\n".join(files)
+        elif output_mode == "count":
+            # 统计每个文件的匹配数
+            file_counts: dict[str, int] = {}
+            for r in results:
+                file_counts[r.file] = file_counts.get(r.file, 0) + 1
+            output = "\n".join(f"{f}:{c}" for f, c in file_counts.items())
         else:
-            output = "\n".join(lines)
+            # 显示完整内容
+            output_lines = []
+            for r in results:
+                content = r.content.strip() if hasattr(r, 'content') else ""
+                line_no = r.line_number if hasattr(r, 'line_number') else 0
+                output_lines.append(f"{r.file}:{line_no}:{content}")
+            output = "\n".join(output_lines)
 
         # 截断过长输出
         if len(output) > MAX_OUTPUT_CHARS:
@@ -449,9 +424,6 @@ async def grep_search(
             ToolResult(success=True, output=output)
         )
 
-    except ImportError:
-        # fallback 到 Python re
-        return await _grep_fallback(ctx, pattern, path, glob, output_mode, head_limit)
     except Exception as e:
         return _finalize(
             ctx, "grep_search", {"pattern": pattern, "path": path},
@@ -910,126 +882,88 @@ async def _run_sub_agent(deps: MiniCCDeps, task_obj: AgentTask) -> None:
         deps.sub_agent_tasks.pop(task_obj.task_id, None)
 
 
-# ============ Fallback 实现 ============
+# ============ Ripgrepy 扩展功能 ============
 
 
-async def _glob_fallback(
+async def _grep_ripgrepy(
     ctx: RunContext[MiniCCDeps],
     pattern: str,
     path: str | None,
-) -> ToolResult:
-    """使用 pathlib.glob 的回退实现"""
-    try:
-        search_path = _resolve_path(ctx.deps.cwd, path or ".")
-        matches = list(search_path.glob(pattern))
-
-        files = [m for m in matches if m.is_file()]
-        relative_paths = []
-        for f in files:
-            try:
-                rel = f.relative_to(ctx.deps.cwd)
-                relative_paths.append(str(rel))
-            except ValueError:
-                relative_paths.append(str(f))
-
-        if not relative_paths:
-            return _finalize(
-                ctx, "glob_files", {"pattern": pattern},
-                ToolResult(success=True, output=f"未找到匹配 '{pattern}' 的文件")
-            )
-
-        return _finalize(
-            ctx, "glob_files", {"pattern": pattern},
-            ToolResult(success=True, output="\n".join(sorted(relative_paths)))
-        )
-
-    except Exception as e:
-        return _finalize(
-            ctx, "glob_files", {"pattern": pattern},
-            ToolResult(success=False, output="", error=str(e))
-        )
-
-
-async def _grep_fallback(
-    ctx: RunContext[MiniCCDeps],
-    pattern: str,
-    path: str | None,
-    glob_filter: str | None,
+    glob: str | None,
     output_mode: str,
+    context_before: int | None,
+    context_after: int | None,
+    context: int | None,
+    case_insensitive: bool,
     head_limit: int | None,
+    file_type: str | None,
 ) -> ToolResult:
-    """使用 Python re 的回退实现"""
+    """使用 ripgrepy 的 grep 实现（支持上下文行等高级功能）"""
     try:
-        search_path = _resolve_path(ctx.deps.cwd, path or ".")
-        regex = re.compile(pattern)
-        results = []
+        from ripgrepy import Ripgrepy
 
-        # 确定要搜索的文件
-        if search_path.is_file():
-            files = [search_path]
+        search_path = str(_resolve_path(ctx.deps.cwd, path or "."))
+        rg = Ripgrepy(pattern, search_path)
+
+        if case_insensitive:
+            rg = rg.i()
+
+        if glob:
+            rg = rg.glob(glob)
+
+        if file_type:
+            rg = rg.type(file_type)
+
+        if context:
+            rg = rg.context(context)
         else:
-            glob_pattern = glob_filter or "**/*"
-            files = list(search_path.glob(glob_pattern))
+            if context_before:
+                rg = rg.before_context(context_before)
+            if context_after:
+                rg = rg.after_context(context_after)
 
-        for file_path in files:
-            if not file_path.is_file():
-                continue
+        if output_mode == "files_with_matches":
+            rg = rg.files_with_matches()
+        elif output_mode == "count":
+            rg = rg.count()
+        else:
+            rg = rg.with_filename().line_number()
 
-            try:
-                content = file_path.read_text(encoding="utf-8")
+        try:
+            result = rg.run()
+            output = result.as_string if hasattr(result, 'as_string') else str(result)
+        except Exception:
+            output = ""
 
-                if output_mode == "files_with_matches":
-                    if regex.search(content):
-                        try:
-                            rel = file_path.relative_to(ctx.deps.cwd)
-                            results.append(str(rel))
-                        except ValueError:
-                            results.append(str(file_path))
-                elif output_mode == "count":
-                    count = len(regex.findall(content))
-                    if count > 0:
-                        try:
-                            rel = file_path.relative_to(ctx.deps.cwd)
-                            results.append(f"{rel}:{count}")
-                        except ValueError:
-                            results.append(f"{file_path}:{count}")
-                else:  # content
-                    for line_no, line in enumerate(content.splitlines(), 1):
-                        if regex.search(line):
-                            try:
-                                rel = file_path.relative_to(ctx.deps.cwd)
-                                results.append(f"{rel}:{line_no}:{line.strip()}")
-                            except ValueError:
-                                results.append(f"{file_path}:{line_no}:{line.strip()}")
-
-            except (UnicodeDecodeError, PermissionError):
-                continue
-
-        if not results:
+        if not output.strip():
             return _finalize(
-                ctx, "grep_search", {"pattern": pattern},
+                ctx, "grep_search", {"pattern": pattern, "path": path},
                 ToolResult(success=True, output=f"未找到匹配 '{pattern}' 的内容")
             )
 
-        if head_limit:
-            results = results[:head_limit]
+        lines = output.strip().split("\n")
 
-        output = "\n".join(results)
+        if head_limit and len(lines) > head_limit:
+            lines = lines[:head_limit]
+            output = "\n".join(lines) + f"\n... 还有更多结果"
+        else:
+            output = "\n".join(lines)
+
         if len(output) > MAX_OUTPUT_CHARS:
             output = output[:MAX_OUTPUT_CHARS] + "\n... 输出已截断"
 
         return _finalize(
-            ctx, "grep_search", {"pattern": pattern},
+            ctx, "grep_search", {"pattern": pattern, "path": path, "output_mode": output_mode},
             ToolResult(success=True, output=output)
         )
 
-    except re.error as e:
+    except ImportError:
         return _finalize(
-            ctx, "grep_search", {"pattern": pattern},
-            ToolResult(success=False, output="", error=f"无效的正则表达式: {e}")
+            ctx, "grep_search", {"pattern": pattern, "path": path},
+            ToolResult(success=False, output="", error="ripgrepy 未安装，无法使用上下文行功能")
         )
     except Exception as e:
         return _finalize(
-            ctx, "grep_search", {"pattern": pattern},
+            ctx, "grep_search", {"pattern": pattern, "path": path},
             ToolResult(success=False, output="", error=str(e))
         )

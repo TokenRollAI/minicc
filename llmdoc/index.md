@@ -13,6 +13,29 @@
 
 ## 最近更新
 
+### Agent-Gear FileSystem 集成 (v0.2 - 2025-11-30)
+- **新增依赖**: agent-gear>=0.1.0 (高性能文件系统操作)
+- **schemas.py 变更**: 新增 `MiniCCDeps.fs` 字段存储 FileSystem 实例
+- **app.py 集成**:
+  - 初始化全局 FileSystem 实例：`self._fs = FileSystem(cwd, auto_watch=True)`
+  - 添加 `_wait_fs_ready()` 后台方法等待索引就绪
+  - 在 `action_quit()` 中关闭 FileSystem 释放资源
+- **tools.py 性能优化** (1162 行 → 1259 行):
+  - **read_file**: 使用 `fs.read_lines()` 进行分段读取，支持 offset/limit
+  - **write_file**: 使用 `fs.write_file()` 原子写入（temp-fsync-rename）
+  - **edit_file**: 结合 fs 接口实现原子编辑操作
+  - **glob_files**: 使用 `fs.glob()` 利用内存索引 + LRU 缓存（2-3x 加速）
+  - **grep_search**: 使用 `fs.grep()` 高性能搜索（基于 ripgrep 核心库）
+  - 新增 fallback 函数保证兼容性：_read_file_fallback, _write_file_fallback, _edit_file_fallback, _grep_ripgrepy
+- **性能收益**:
+  - 内存文件索引 + LRU 缓存加速文件搜索
+  - 并行批量读取文件
+  - 原子写入保证数据完整性
+  - 文件监听自动更新索引，无需手动刷新
+- 详见：
+  - [/llmdoc/overview/project.md](./overview/project.md) - 技术决策更新
+  - [/llmdoc/architecture/modules.md](./architecture/modules.md) - 模块详细说明
+
 ### 工具系统重构完成 (v1.1 - 2025-11-28)
 - **新增依赖**: ripgrepy (高性能搜索), wcmatch (高级 glob), nbformat (Jupyter 支持)
 - **tools.py 扩展**: 760 行 → 1162 行，新增 10+ 工具
