@@ -35,9 +35,21 @@ python -m minicc
 | 快捷键 | 功能 |
 |--------|------|
 | Enter | 发送消息 |
+| Ctrl+J | 在输入框换行 |
 | Ctrl+C | 退出应用 |
 | Ctrl+L | 清屏 |
 | Escape | 取消当前操作 |
+
+## 输入框 @ 引用文件
+
+在输入框中输入 `@` + 文件名片段可触发候选列表，用于快速插入项目内文件路径：
+
+- `↑/↓`：选择候选
+- `Enter` / `Tab`：插入选中文件
+- `Esc`：关闭候选列表
+
+说明：
+- 为避免列出全量文件，`@` 后至少输入 1 个字符才会出现候选。
 
 ## 配置文件
 
@@ -47,15 +59,19 @@ python -m minicc
 {
   "provider": "anthropic",
   "model": "claude-sonnet-4-20250514",
-  "api_key": null
+  "api_key": null,
+  "base_url": null,
+  "prompt_cache": {
+    "instructions": false,
+    "messages": false,
+    "tool_definitions": false
+  }
 }
 ```
 
 ### MCP 配置（可选）
 
-MiniCC 会在运行时加载 MCP 服务器，并将其工具注入到 Agent 中。
-
-MCP 工具的调用也会像内置工具一样在 UI 中显示“🔧 工具调用”提示。
+MiniCC 会在**启动阶段**加载 MCP 服务器，并将其工具注入到 Agent 中（非懒加载）。
 
 如需启用 MCP（连接/启动 MCP servers），请确保安装了可选依赖：
 
@@ -68,6 +84,12 @@ uv pip install "minicc[mcp]"
 ```
 
 未安装 MCP 依赖时，MiniCC 会告警并自动降级为“不加载 MCP”，不会影响应用启动。
+
+如需在“缺少 MCP 依赖/配置错误”时直接失败（便于 CI 或严格环境），可设置：
+
+```bash
+export MINICC_MCP_STRICT=1
+```
 
 配置文件位置优先级：
 
@@ -102,28 +124,15 @@ uv pip install "minicc[mcp]"
 
 自定义系统提示词，可以修改 Agent 的行为和工具使用策略。
 
-## 编程接口
+## 编程接口（内部/不稳定）
 
-```python
-import asyncio
-from minicc import create_agent, MiniCCDeps, load_config
-
-async def main():
-    config = load_config()
-    deps = MiniCCDeps(config=config, cwd="/path/to/project")
-    agent = create_agent(config, cwd=deps.cwd)
-
-    result = await agent.run("你的问题", deps=deps)
-    print(result.data)
-
-asyncio.run(main())
-```
+v0.3.0 起 MiniCC 对外仅保证 TUI 行为稳定；如需在代码中复用，请直接使用 `pydantic-ai`，或阅读 `minicc/core/runtime.py` 的组装方式自行集成。
 
 ## 开发调试
 
 ```bash
 # 使用 textual 开发模式
-uv run textual run --dev minicc.app:MiniCCApp
+uv run textual run --dev minicc.tui.app:MiniCCApp
 
 # 在另一个终端查看日志
 textual console

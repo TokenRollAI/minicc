@@ -17,25 +17,23 @@
 - **文件操作**: read_file, write_file, edit_file (精确字符串替换)
 - **搜索**: glob_files (高级 glob 模式), grep_search (ripgrepy 高性能)
 - **命令行**: bash, bash_output (后台执行), kill_shell (终止后台任务)
-- **任务管理**: task (创建子任务), todo_write (任务追踪), bash_output (获取后台输出)
-- **Notebook**: notebook_edit (Jupyter notebook 编辑)
+- **任务管理**: task (子任务/可等待), wait_subagents (等待后台子任务), todo_write (任务追踪)
+- **用户交互**: ask_user (TUI 面板选择题/多选题)
 
 ### 提示词 (Prompt)
 - 系统提示词: ~/.minicc/AGENTS.md
 - 工具描述: 从函数 docstring 自动提取
 
 ### 子代理 (SubAgent)
-- 使用 task() 工具创建子任务 (替代原 spawn_agent)
-- 异步执行，不阻塞主 Agent
-- 支持任务追踪和状态查询
+- 使用 task() 工具创建子任务
+- **默认等待**：`task(wait=True)` 会等待子代理完成并返回结果（主 Agent 可直接整合）
+- 可并行：`task(wait=False)` 后台启动，最后用 `wait_subagents()` 汇总等待
 
 ### 用户界面 (UI)
-- Textual TUI 终端界面，支持流式输出和快捷键操作
-- 清晰的聊天布局：Header → 消息区 → 输入框 → 状态栏 → Footer
-- 可折叠的工具调用面板（默认折叠，避免视觉噪音）
-- 可折叠的 SubAgent 任务面板（显示任务状态和结果）
-- 底边栏显示关键上下文（模型/目录/分支/Token统计）
-- 支持 Markdown 消息渲染和颜色代码语法高亮
+- Textual TUI 终端界面，支持流式输出、快捷键、工具调用行与任务列表
+- **事件驱动**：UI 直接消费 `agent.run_stream_events()` 的工具调用事件，ToolCallLine 支持 running/completed/failed 状态
+- ask_user 使用面板交互并阻塞等待用户提交/取消
+- 底边栏显示关键上下文（模型/目录/分支/Token 统计）
 
 ## 技术决策
 
@@ -46,4 +44,8 @@
 | 搜索引擎 | ripgrepy + wcmatch | 高性能，对标 Claude Code（ripgrep 核心库） |
 | 文件编辑 | edit_file 精确替换 | 避免歧义，支持空白容错，原子操作 |
 | 后台任务 | bash_output + kill_shell | 支持长运行任务和交互式命令 |
-| Notebook 编辑 | nbformat 库 | 完整的 Jupyter 支持 |
+
+## v0.3.0 架构变化（概要）
+
+- **结构拆分**：`minicc/core`（运行时/模型/事件/MCP）、`minicc/tools`（工具实现）、`minicc/tui`（界面）
+- **MCP 预加载**：启动阶段加载并缓存 toolsets（避免子代理重复加载）；可用 `MINICC_MCP_STRICT=1` 强制失败

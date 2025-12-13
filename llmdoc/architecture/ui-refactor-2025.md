@@ -1,12 +1,23 @@
-# TUI 首页重构记录
+# TUI 首页重构记录（历史 + v0.3.0 补充）
 
 ## 概述
 
 MiniCC TUI 首页进行了重大重构，优化了界面布局和组件交互。重构移除了侧边栏，引入了可折叠面板和底边栏，创建了更清晰、信息密度更高的聊天界面。
 
-**版本:** v1.0
+**版本:** v1.0（历史）
 **日期:** 2025-11-27
-**影响:** minicc/app.py、minicc/ui/widgets.py、minicc/ui/__init__.py
+**影响（当时）:** minicc/app.py、minicc/ui/widgets.py、minicc/ui/__init__.py（这些路径在 v0.3.0 已移除）
+
+> 注意：本文件中 v1.0 的“代码路径/实现细节”仅供历史回溯；当前实现以 `minicc/tui/*` 与 `llmdoc/architecture/tui-layout.md` 为准。
+
+## v0.3.0 补充：事件驱动 UI（当前）
+
+v0.3.0 做了进一步的大重构：
+- TUI 代码迁移到 `minicc/tui/*`
+- tools 按职责拆分到 `minicc/tools/*`
+- UI 不再依赖 “tools 内部回调”，而是直接消费 `agent.run_stream_events()` 的工具调用事件
+- 底边栏 token 图标改为 `↑/↓`（避免部分终端对 emoji 宽度支持不佳导致显示方块）
+- 流式输出改为实时更新 MessagePanel，并在布局刷新后滚动到底部
 
 ## 移除的内容
 
@@ -15,7 +26,7 @@ MiniCC TUI 首页进行了重大重构，优化了界面布局和组件交互。
 - info_card: 信息卡
 - TabbedContent: 工具 Tab / SubAgents Tab
 
-**原因:** 侧边栏占用宝贵的水平空间，工具调用现已通过可折叠面板与消息内联显示。
+**原因:** 侧边栏占用宝贵的水平空间；后续改为在消息流中内联显示工具调用行与子任务行。
 
 ## 新增的内容
 
@@ -26,7 +37,7 @@ MiniCC TUI 首页进行了重大重构，优化了界面布局和组件交互。
 - `📦 模型`: provider:model (如 `anthropic:claude-sonnet-4`)
 - `📁 工作目录`: 当前 cwd（超长时显示尾部）
 - `🌿 Git 分支`: 当前分支名
-- `⬆️⬇️ Token`: 累计输入/输出 token 数
+- `⬆️⬇️ Token`: 累计输入/输出 token 数（v0.3.0 已改为 `↑/↓`）
 
 **特点:** 恒定显示，实时更新，无需折叠。
 

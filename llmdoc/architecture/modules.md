@@ -1,159 +1,75 @@
-# 模块架构
+# 模块架构（v0.3.0 大重构）
 
 ## 模块依赖关系
 
 ```
-┌─────────────┐
-│   app.py    │  TUI 入口
-└──────┬──────┘
+┌──────────────┐
+│  minicc/cli  │  CLI 入口
+└──────┬───────┘
        │
        ▼
-┌─────────────┐     ┌─────────────┐
-│  agent.py   │────▶│  tools.py   │
-└──────┬──────┘     └──────┬──────┘
-       │                   │
-       ▼                   ▼
-┌─────────────┐     ┌─────────────┐
-│  config.py  │     │ schemas.py  │
-└─────────────┘     └─────────────┘
+┌──────────────┐
+│ minicc/tui   │  Textual TUI
+└──────┬───────┘
+       │  build_runtime()
+       ▼
+┌──────────────┐     ┌──────────────┐
+│ minicc/core  │◀───▶│ minicc/tools │
+└──────────────┘     └──────────────┘
 ```
+
+关键设计点：
+- **TUI 不再依赖 tools 内部回调**，而是消费 `Agent.run_stream_events()` 的工具事件。
+- **core 提供事件总线与服务层**（ask_user、subagents），tools 只做业务逻辑与依赖注入读取。
+- **MCP 在启动阶段预加载并缓存**，避免每次 create_agent 重复加载。
 
 ## 模块职责
 
-### schemas.py (248 行)
-数据模型定义，所有 Pydantic 模型集中管理。
+### minicc/core/models.py
+数据模型定义（内部使用）。
 
-**关键类:**
-- `Config`: 应用配置结构（新增 PromptCache 支持）
-- `PromptCache`: Anthropic Prompt Cache 配置
-- `Provider`: LLM 提供商枚举
-- `ToolResult`: 工具执行结果
-- `DiffLine`: Diff 行信息
-- `AgentTask`: SubAgent 任务定义（新增 description, subagent_type）
-- `TodoItem`: 任务列表项
-- `BackgroundShell`: 后台 Shell 进程信息
-- `QuestionOption`: 问题选项（新增）
-- `Question`: 问题定义（新增）
-- `AskUserRequest`: ask_user 请求（新增）
-- `AskUserResponse`: ask_user 响应（新增）
-- `UserCancelledError`: 用户取消异常（新增）
-- `MiniCCDeps`: Agent 依赖注入容器，新增字段：
-  - `fs: Any = None`: agent-gear FileSystem 实例（高性能文件操作）
-  - `todos`: 任务列表（TodoWrite 工具管理）
-  - `background_shells`: 后台 Shell 进程字典
-  - `on_todo_update`: 任务列表更新回调
-  - `ask_user_response`: ask_user 工具的用户响应（新增）
-  - `ask_user_event`: ask_user 等待事件（新增）
-  - `on_ask_user`: ask_user 回调（新增）
+核心模型：
+- `Config` / `Provider` / `PromptCache`
+- `ToolResult` / `DiffLine`
+- `AgentTask` / `TodoItem` / `BackgroundShell`
+- `Question*` / `AskUserRequest` / `AskUserResponse`
+- `MiniCCDeps`：依赖注入容器（增加 `event_bus`、`ask_user_service`、`subagent_service`）
 
-### config.py (155 行)
-配置文件管理，处理 ~/.minicc 目录。
+### minicc/core/config.py
+配置管理（~/.minicc/config.json、AGENTS.md、MCP 配置查找）。
 
-**关键函数:**
-- `load_config()`: 加载配置
-- `save_config()`: 保存配置
-- `load_agents_prompt()`: 加载系统提示词
-- `get_api_key()`: 获取 API 密钥
+### minicc/core/mcp.py
+MCP toolsets 加载与缓存：
+- `load_mcp_toolsets(cwd)`：启动时加载；按配置路径缓存；支持 `MINICC_MCP_STRICT=1` 严格模式。
 
-### tools.py (1040 行)
-工具函数实现，定义所有可供 Agent 调用的工具。基于 agent-gear FileSystem 进行性能优化，对标 Claude Code。
+### minicc/core/agent.py
+Agent 创建：
+- `create_agent(config, cwd, toolsets, register_tools)`：支持外部传入预加载的 MCP toolsets。
 
-**工具分类:**
-- **文件操作**（Agent-Gear 优化）:
-  - `read_file`: 使用 `fs.read_lines()` 进行分段读取，支持 offset/limit，output 为 cat -n 格式
-    - Fallback: `_read_file_fallback()` 基于 pathlib 的原始实现
-  - `write_file`: 使用 `fs.write_file()` 原子写入（temp-fsync-rename），安全可靠
-    - Fallback: `_write_file_fallback()` 基于原始 Path.write_text()
-  - `edit_file`: 结合 `fs.read_file()` 和 `fs.write_file()` 实现精确字符串替换 + 空白容错
-    - Fallback: `_edit_file_fallback()` 基于字符串操作的原始实现
-- **搜索**（Agent-Gear 优化）:
-  - `glob_files`: 使用 `fs.glob()` 利用内存索引 + LRU 缓存，2-3x 加速
-    - Fallback: `_glob_fallback()` 基于 wcmatch 的原始实现
-  - `grep_search`: 使用 `fs.grep()` 高性能搜索（基于 ripgrep 核心库）
-    - Fallback: `_grep_ripgrepy()` 使用 ripgrepy 库
-    - Fallback: `_grep_fallback()` 使用 pathlib 遍历
-- **命令行**:
-  - `bash` (同步执行，timeout/description/run_in_background 参数)
-  - `bash_output` (获取后台命令输出)
-  - `kill_shell` (终止后台命令)
-- **任务管理**:
-  - `task` (创建子任务)
-  - `todo_write` (任务追踪)
-- **用户交互**（新增）:
-  - `ask_user` (向用户提问选择题)
-    - 支持单选/多选
-    - 自动添加"其他"选项
-    - 取消时抛出 `UserCancelledError` 终止 Agent 循环
-- **Notebook**:
-  - `notebook_edit` (Jupyter notebook 编辑)
+### minicc/core/events.py
+事件总线与事件类型：
+- `EventBus`：`emit()` + `iter()` 消费。
+- `ToolCallStarted/Finished`、`TodoUpdated`、`AskUserRequested`、`SubAgentCreated/Updated` 等。
 
-**核心优化策略**:
-- 内存文件索引 + LRU 缓存：避免重复 I/O
-- 原子操作：temp-fsync-rename 保证数据完整性
-- 文件监听：自动更新索引，无需手动刷新
-- Fallback 兼容性：FileSystem 不可用时自动降级
+### minicc/core/runtime.py
+运行时组装：
+- `build_runtime()`：创建 FileSystem、预加载 MCP toolsets、构造 deps 与 services、创建 Agent。
 
-### agent.py (148 行)
-Agent 定义，使用 pydantic-ai 创建和配置。
+### minicc/core/services/*
+服务层（与 UI 解耦）：
+- `AskUserService`：通过事件总线请求 UI，等待 UI resolve。
+- `SubAgentService`：支持等待或后台运行（`background`）。
 
-**关键函数:**
-- `create_model()`: 创建模型标识符
-- `create_agent()`: 创建并配置 Agent（支持 `cwd`，启动时静态加载 MCP toolsets）
+### minicc/tools/*
+按职责拆分的工具实现：
+- `file.py`：read_file/write_file/edit_file（无 fs 时自动 fallback）。
+- `search.py`：glob_files/grep_search（优先 ripgrepy，缺依赖 fallback）。
+- `shell.py`：bash/bash_output/kill_shell（超时会杀进程组避免残留）。
+- `task.py`：task/todo_write/wait_subagents。
+- `registry.py`：统一注册工具。
 
-**MCP 相关:**
-- MCP 配置加载由 `minicc/mcp_loader.py` 负责（惰性导入、缺依赖降级、避免 DynamicToolset 引发 anyio CancelScope 报错）
-- MCP 工具调用提示由 `minicc/mcp_ui_toolset.py` 负责（通过 `deps.on_tool_call` 接入 UI）
-
-### app.py (262 行)
-Textual TUI 主应用，处理用户交互和消息流处理。
-
-**关键功能:**
-- 消息输入和显示（MessagePanel）
-- 流式输出处理（工具调用和响应文本）
-- 快捷键绑定（Ctrl+C 退出、Ctrl+L 清屏、Escape 取消）
-- 工具调用回调处理（ToolCallLine / SubAgentLine）
-- Token 使用量追踪和更新（BottomBar.add_tokens）
-- **Agent-Gear FileSystem 集成**（新增）:
-  - `__init__` 中初始化：`self._fs = FileSystem(cwd, auto_watch=True)`
-  - `_wait_fs_ready()` 后台方法等待索引就绪（使用 @work 装饰器）
-  - `action_quit()` 中关闭 FileSystem 释放资源
-
-**布局结构:**
-```
-Header
-↓
-chat_container (VerticalScroll) - 消息/工具调用/SubAgent
-  ├─ MessagePanel: 用户/助手消息
-  ├─ ToolCallLine: 工具调用（单行简洁）
-  ├─ SubAgentLine: SubAgent 任务（单行简洁）
-  └─ DiffView: 文件变更预览
-↓
-Input - 用户输入框
-↓
-BottomBar - 模型/目录/分支/Token
-↓
-Footer
-```
-
-### ui/widgets.py (530 行)
-自定义 UI 组件集合，已精简为核心组件。
-
-**保留的组件:**
-- `MessagePanel`: 消息面板，支持 Markdown 渲染和角色区分
-- `ToolCallLine`: 工具调用单行显示 `🔧 tool_name (param) ✅/❌`
-- `SubAgentLine`: SubAgent 单行显示 `🤖 prompt_summary ⏳/🔄/✅/❌`
-- `DiffView`: Diff 显示，颜色区分添加/删除/上下文
-- `BottomBar`: 底边栏，分区块显示模型/目录/分支/Token
-- `TodoDisplay`: 任务列表显示
-- `AskUserPanel`: 用户问答面板（新增）
-  - 支持单选（RadioSet）和多选（Checkbox）
-  - 每个问题自动添加"其他"选项
-  - 提交/取消按钮
-  - 发送 `Submitted` / `Cancelled` 消息
-
-**已移除的组件:**
-- `ToolCallPanel` → 被 `ToolCallLine` 替代（更简洁）
-- `SubAgentPanel` → 被 `SubAgentLine` 替代
-- `UsageDisplay` → 功能集成到 `BottomBar`
-- `StatusBar` → 功能已弃用
-- `CollapsibleToolPanel` → 被 `ToolCallLine` 替代
+### minicc/tui/*
+Textual TUI：
+- `app.py`：消费 stream events + event_bus，渲染 ToolCallLine/SubAgentLine/Todo/ask_user。
+- `widgets.py`：组件（ToolCallLine 支持状态更新；BottomBar 使用通用箭头符号）。
+- `ask_user_panel.py`：问答面板。

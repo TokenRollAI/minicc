@@ -43,12 +43,10 @@ uv run minicc
 
 ```
 minicc/
-├── app.py       # TUI 主程序
-├── agent.py     # Agent 定义
-├── tools.py     # 工具实现 (文件操作、搜索、bash)
-├── config.py    # 配置管理
-├── schemas.py   # 数据模型
-└── ui/          # UI 组件
+├── cli.py       # 入口（仅启动 TUI）
+├── core/        # 运行时/模型/事件总线/MCP 预加载
+├── tools/       # 工具实现（按职责拆分）
+└── tui/         # Textual TUI（消费 stream events）
 ```
 
 ## 配置
@@ -97,11 +95,12 @@ MiniCC 会自动加载 MCP servers，并把它们的工具注册给 Agent。
 | ------------ | -------------- |
 | read_file    | 读文件         |
 | write_file   | 写文件         |
-| update_file  | 改文件         |
-| search_files | 按模式搜索文件 |
-| grep         | 正则搜索内容   |
+| edit_file    | 改文件         |
+| glob_files   | 按模式搜索文件 |
+| grep_search  | 正则搜索内容   |
 | bash         | 执行命令       |
-| spawn_agent  | 创建子任务     |
+| task         | 子任务（默认等待） |
+| wait_subagents | 等待所有后台子任务 |
 
 ## License
 

@@ -24,52 +24,11 @@ MiniCC - 极简教学版 AI 编程助手
     系统提示词位于 ~/.minicc/AGENTS.md
 """
 
-__version__ = "0.2.3"
+__version__ = "0.3.1"
 __author__ = "MiniCC Contributors"
 
-from .agent import create_agent, run_agent
-from .app import MiniCCApp, main
-from .config import (
-    AGENTS_FILE,
-    CONFIG_DIR,
-    CONFIG_FILE,
-    get_api_key,
-    load_agents_prompt,
-    load_config,
-    save_config,
-)
-from .schemas import (
-    AgentTask,
-    Config,
-    DiffLine,
-    MiniCCDeps,
-    Provider,
-    ToolResult,
-)
+# 仅对外暴露 TUI 入口
+from minicc.cli import main
+from minicc.tui.app import MiniCCApp
 
-__all__ = [
-    # 版本信息
-    "__version__",
-    "__author__",
-    # 应用入口
-    "MiniCCApp",
-    "main",
-    # Agent 相关
-    "MiniCCDeps",
-    "create_agent",
-    "run_agent",
-    # 配置相关
-    "load_config",
-    "save_config",
-    "load_agents_prompt",
-    "get_api_key",
-    "CONFIG_DIR",
-    "CONFIG_FILE",
-    "AGENTS_FILE",
-    # 数据模型
-    "Config",
-    "Provider",
-    "ToolResult",
-    "DiffLine",
-    "AgentTask",
-]
+__all__ = ["__version__", "__author__", "MiniCCApp", "main"]

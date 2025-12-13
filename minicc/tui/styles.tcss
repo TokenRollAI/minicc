@@ -29,7 +29,7 @@ ToolCallLine, SubAgentLine {
 }
 
 #input {
-    height: 3;
+    height: 5;
     margin: 1 1 0 1;
     border: round #f59e0b;
     background: #111827;
@@ -62,7 +62,16 @@ Footer {
     margin: 0 1 1 1;
 }
 
-/* AskUserPanel 样式 - 与其他组件风格一致 */
+/* @ 引用文件候选列表容器 */
+#mention_container {
+    height: auto;
+    margin: 0 1 0 1;
+}
+
+FileMentionPanel {
+    height: auto;
+}
+
 AskUserPanel {
     height: auto;
 }
